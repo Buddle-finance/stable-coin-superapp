@@ -20,23 +20,27 @@ import {
 contract RedirectTokens is SuperAppBase {
     ISuperfluid private _host; // host
     IConstantFlowAgreementV1 private _cfa; // the stored constant flow agreement class address
-    ISuperToken private _acceptedToken; // accepted token
+    ISuperToken private token1; // accepted token
+    ISuperToken private token2; // accepted token
     address private _receiver;
 
     constructor(
         ISuperfluid host,
         IConstantFlowAgreementV1 cfa,
-        ISuperToken acceptedToken,
+        ISuperToken _token1,
+        ISuperToken _token2,
         address receiver) {
         require(address(host) != address(0), "host is zero address");
         require(address(cfa) != address(0), "cfa is zero address");
-        require(address(acceptedToken) != address(0), "acceptedToken is zero address");
+        require(address(token1) != address(0), "token1 is zero address");
+        require(address(token2) != address(0), "token2 is zero address");
         require(address(receiver) != address(0), "receiver is zero address");
         require(!host.isApp(ISuperApp(receiver)), "receiver is an app");
 
         _host = host;
         _cfa = cfa;
-        _acceptedToken = acceptedToken;
+        token1 = _token1;
+        token2 = _token2;
         _receiver = receiver;
 
         uint256 configWord =
@@ -53,20 +57,6 @@ contract RedirectTokens is SuperAppBase {
      * Redirect Logic
      *************************************************************************/
 
-    function currentReceiver()
-        external view
-        returns (
-            uint256 startTime,
-            address receiver,
-            int96 flowRate
-        )
-    {
-        if (_receiver != address(0)) {
-            (startTime, flowRate,,) = _cfa.getFlow(_acceptedToken, address(this), _receiver);
-            receiver = _receiver;
-        }
-    }
-
     event ReceiverChanged(address receiver); //what is this?
 
     /// @dev If a new stream is opened, or an existing one is opened
@@ -74,20 +64,24 @@ contract RedirectTokens is SuperAppBase {
         private
         returns (bytes memory newCtx)
     {
-      newCtx = ctx;
-      // @dev This will give me the new flowRate, as it is called in after callbacks
-      int96 netFlowRate = _cfa.getNetFlow(_acceptedToken, address(this));
-      (,int96 outFlowRate,,) = _cfa.getFlow(_acceptedToken, address(this), _receiver); // CHECK: unclear what happens if flow doesn't exist.
-      int96 inFlowRate = netFlowRate + outFlowRate;
+        newCtx = ctx;
+        // @dev This will give me the new flowRate, as it is called in after callbacks
+        int96 token1InFlow = _cfa.getNetFlow(token1, address(this));
+        int96 token2InFlow = _cfa.getNetFlow(token2, address(this));
+        (,int96 token1OutFlow,,) = _cfa.getFlow(token1, address(this), _receiver);
+        (,int96 token2OutFlow,,) = _cfa.getFlow(token2, address(this), _receiver);
+
+        // int96 inFlowRate = netFlowRate + outFlowRate;
+        
 
       // @dev If inFlowRate === 0, then delete existing flow.
-      if (inFlowRate == int96(0)) {
+      if (token1InFlow == int96(0)) {
         // @dev if inFlowRate is zero, delete outflow.
           (newCtx, ) = _host.callAgreementWithContext(
               _cfa,
               abi.encodeWithSelector(
                   _cfa.deleteFlow.selector,
-                  _acceptedToken,
+                  token2,
                   address(this),
                   _receiver,
                   new bytes(0) // placeholder
@@ -95,14 +89,14 @@ contract RedirectTokens is SuperAppBase {
               "0x",
               newCtx
           );
-        } else if (outFlowRate != int96(0)){
+        } else if (token1InFlow != int96(0)){
         (newCtx, ) = _host.callAgreementWithContext(
             _cfa,
             abi.encodeWithSelector(
                 _cfa.updateFlow.selector,
-                _acceptedToken,
+                token1,
+                address(this),
                 _receiver,
-                inFlowRate,
                 new bytes(0) // placeholder
             ),
             "0x",
@@ -161,7 +155,6 @@ contract RedirectTokens is SuperAppBase {
         // @dev set global receiver to new receiver
         _receiver = newReceiver;
 
-        emit ReceiverChanged(_receiver);
     }
 
     /**************************************************************************
