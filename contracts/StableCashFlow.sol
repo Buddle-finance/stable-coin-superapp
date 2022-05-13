@@ -37,8 +37,10 @@ contract StableCashFlow is RedirectTokens {
         // TODO: Mint amm tokens to the owner
     }
 
-    function removeLiquidity(uint256 _amount) public {        
-        // TODO: Burn amm tokens and transfer value of token 1 and 2 to the owner
+    function removeLiquidity() public {        
+        // TODO: Burn amm tokens and transfer value of token 1 and 2 to the owner        
+        token2.transferFrom(address(this), msg.sender, token2.balanceOf(address(this)));
+        token1.transferFrom(address(this), msg.sender, token1.balanceOf(address(this)));
     }   
 
 }

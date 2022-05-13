@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "hardhat/console.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import {
     ISuperfluid,
     ISuperToken,
@@ -65,15 +66,61 @@ contract RedirectTokens is SuperAppBase {
 
         _host.registerApp(configWord);
     }
-
-    // /* App Functions */
-    // TODO: Create function to percent difference from token1 to token2 to calculate fees
-    function calculateFlowToken1(int96 flowRate) pure internal returns (int96) {
-        return flowRate;
+    
+    function getRatio(uint numerator, uint denominator) pure internal returns (uint) {
+        uint _numerator = numerator * 10 ** (18 + 1);
+        uint _quotient = ((_numerator / denominator) + 5) / 10;
+        return _quotient;
     }
 
-    function calculateFlowToken2(int96 flowRate) pure internal returns (int96) {
-        return flowRate;
+    function safeCastToInt96(uint256 _value) internal pure returns (int96) {
+        if (_value > (2 ** 96) - 1) {
+            return int96(0);
+        }
+        int _result = int(_value);
+        return int96(_result);
+    }
+
+    // /* App Functions */
+    // Create function to percent difference from token1 to token2 to calculate fees
+    function calculateFlowToken1(int96 _flowRate) view public returns (int96) {
+        uint256 flowRate = uint256(int(_flowRate));
+
+        uint256 token1Balance = token1.balanceOf(address(this));
+        uint256 token2Balance = token2.balanceOf(address(this));
+
+        if (token1Balance == token2Balance) {
+            return _flowRate;
+        }
+
+        bool isToken1Greater = token1.balanceOf(address(this)) > token2.balanceOf(address(this));
+        uint ratio = isToken1Greater ? 
+                        getRatio(token2Balance, token1Balance) : 
+                        getRatio(token1Balance, token2Balance);
+
+        return isToken1Greater ? 
+                safeCastToInt96(flowRate - (ratio * (flowRate / 10 ** 4))) :
+                safeCastToInt96(flowRate + (ratio * (flowRate / 10 ** 4)));
+    }
+
+    function calculateFlowToken2(int96 _flowRate) view public returns (int96) {
+        uint256 flowRate = uint256(int(_flowRate));
+
+        uint256 token1Balance = token1.balanceOf(address(this));
+        uint256 token2Balance = token2.balanceOf(address(this));
+
+        if (token1Balance == token2Balance) {
+            return _flowRate;
+        }
+
+        bool isToken2Greater = token1.balanceOf(address(this)) < token2.balanceOf(address(this));
+        uint ratio = isToken2Greater ? 
+                        getRatio(token1Balance, token2Balance) : 
+                        getRatio(token2Balance, token1Balance);
+
+        return isToken2Greater ? 
+                safeCastToInt96(flowRate + (ratio * (flowRate / 10 ** 4))) :
+                safeCastToInt96(flowRate - (ratio * (flowRate / 10 ** 4)));
     }
 
     function _getShareholderInfo(bytes calldata _agreementData, ISuperToken _superToken)
@@ -116,13 +163,12 @@ contract RedirectTokens is SuperAppBase {
             address(this)
         );
 
-        bool istoken1 = _superToken == token1;
-
+        bool isToken1 = _superToken == token1;
         return cfaV1.createFlowWithCtx(
             _ctx, 
             _shareholder, 
-            istoken1 ? token2 : token1, 
-            _flowRate, 
+            isToken1 ? token2 : token1, 
+            isToken1 ? calculateFlowToken2(_flowRate) : calculateFlowToken1(_flowRate),
             "0x"
         );
 
@@ -150,12 +196,13 @@ contract RedirectTokens is SuperAppBase {
             _shareholder,
             address(this)
         );
-        bool istoken1 = _superToken == token1;
+
+        bool isToken1 = _superToken == token1;
         return cfaV1.updateFlowWithCtx(
             _ctx,
             _shareholder,
-            istoken1 ? token2 : token1,
-            _flowRate,
+            isToken1 ? token2 : token1,
+            isToken1 ? calculateFlowToken2(_flowRate) : calculateFlowToken1(_flowRate),
             "0x"
         );
     }
@@ -179,11 +226,12 @@ contract RedirectTokens is SuperAppBase {
             _agreementData, _superToken
         );
 
+        bool isToken1 = _superToken == token1;
         return cfaV1.deleteFlowWithCtx(
             _ctx,
             address(this),
             _shareholder,
-            (_superToken == token1) ? token2 : token1
+            isToken1 ? token2 : token1
         );
     }
 
