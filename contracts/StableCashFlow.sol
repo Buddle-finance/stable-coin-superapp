@@ -12,31 +12,22 @@ contract StableCashFlow is RedirectTokens {
     ISuperToken token1;
     ISuperToken token2;
 
-    bool isInitilized = false;
-    function initilize(
-        address owner,
+    constructor(
         ISuperfluid host,
         IConstantFlowAgreementV1 cfa,
         ISuperToken _token1, 
         ISuperToken _token2
-    ) public {
-        require(!isInitilized);
-
-        RedirectTokens (
+    ) RedirectTokens(
             host,
             cfa,
             _token1,
-            _token2,
-            owner
-        );
-
+            _token2
+        ) public {
         token1 = _token1;
         token2 = _token2;
-        isInitilized = true;
     }
 
     function addLiquidity(uint256 _amount) public {
-        require(isInitilized);
         require(token1.balanceOf(msg.sender) > 0, "Not enough balance");
         require(token2.balanceOf(msg.sender) > 0, "Not enough balance");
 
@@ -46,9 +37,7 @@ contract StableCashFlow is RedirectTokens {
         // TODO: Mint amm tokens to the owner
     }
 
-    function removeLiquidity(uint256 _amount) public {
-        require(isInitilized);
-        
+    function removeLiquidity(uint256 _amount) public {        
         // TODO: Burn amm tokens and transfer value of token 1 and 2 to the owner
     }   
 

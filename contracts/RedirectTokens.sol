@@ -14,34 +14,48 @@ import {
 import { IConstantFlowAgreementV1 } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/IConstantFlowAgreementV1.sol";
 
 import {
+    CFAv1Library
+} from "@superfluid-finance/ethereum-contracts/contracts/apps/CFAv1Library.sol";
+
+import {
     SuperAppBase
 } from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
 
 contract RedirectTokens is SuperAppBase {
+    using CFAv1Library for CFAv1Library.InitData;
+    
+    CFAv1Library.InitData public cfaV1;
     ISuperfluid private _host; // host
-    IConstantFlowAgreementV1 private _cfa; // the stored constant flow agreement class address
     ISuperToken private token1; // accepted token
     ISuperToken private token2; // accepted token
-    address private _receiver;
+    IConstantFlowAgreementV1 cfa;
 
     constructor(
         ISuperfluid host,
-        IConstantFlowAgreementV1 cfa,
+        IConstantFlowAgreementV1 _cfa,
         ISuperToken _token1,
-        ISuperToken _token2,
-        address receiver) {
+        ISuperToken _token2
+    ) {
         require(address(host) != address(0), "host is zero address");
-        require(address(cfa) != address(0), "cfa is zero address");
-        require(address(token1) != address(0), "token1 is zero address");
-        require(address(token2) != address(0), "token2 is zero address");
-        require(address(receiver) != address(0), "receiver is zero address");
-        require(!host.isApp(ISuperApp(receiver)), "receiver is an app");
+        require(address(_token1) != address(0), "token1 is zero address");
+        require(address(_token2) != address(0), "token2 is zero address");
 
         _host = host;
-        _cfa = cfa;
+
+        // initialize InitData struct, and set equal to cfaV1
+        cfaV1 = CFAv1Library.InitData(
+            host,
+            //here, we are deriving the address of the CFA using the host contract
+            IConstantFlowAgreementV1(
+                address(host.getAgreementClass(
+                    keccak256("org.superfluid-finance.agreements.ConstantFlowAgreement.v1")
+                ))
+            )
+        );
+
+        cfa = _cfa;
         token1 = _token1;
         token2 = _token2;
-        _receiver = receiver;
 
         uint256 configWord =
             SuperAppDefinitions.APP_LEVEL_FINAL |
@@ -52,109 +66,27 @@ contract RedirectTokens is SuperAppBase {
         _host.registerApp(configWord);
     }
 
-
-    /**************************************************************************
-     * Redirect Logic
-     *************************************************************************/
-
-    event ReceiverChanged(address receiver); //what is this?
-
-    /// @dev If a new stream is opened, or an existing one is opened
-    function _updateOutflow(bytes calldata ctx)
-        private
-        returns (bytes memory newCtx)
-    {
-        newCtx = ctx;
-        // @dev This will give me the new flowRate, as it is called in after callbacks
-        int96 token1InFlow = _cfa.getNetFlow(token1, address(this));
-        int96 token2InFlow = _cfa.getNetFlow(token2, address(this));
-        (,int96 token1OutFlow,,) = _cfa.getFlow(token1, address(this), _receiver);
-        (,int96 token2OutFlow,,) = _cfa.getFlow(token2, address(this), _receiver);
-
-        // int96 inFlowRate = netFlowRate + outFlowRate;
-        
-
-      // @dev If inFlowRate === 0, then delete existing flow.
-      if (token1InFlow == int96(0)) {
-        // @dev if inFlowRate is zero, delete outflow.
-          (newCtx, ) = _host.callAgreementWithContext(
-              _cfa,
-              abi.encodeWithSelector(
-                  _cfa.deleteFlow.selector,
-                  token2,
-                  address(this),
-                  _receiver,
-                  new bytes(0) // placeholder
-              ),
-              "0x",
-              newCtx
-          );
-        } else if (token1InFlow != int96(0)){
-        (newCtx, ) = _host.callAgreementWithContext(
-            _cfa,
-            abi.encodeWithSelector(
-                _cfa.updateFlow.selector,
-                token1,
-                address(this),
-                _receiver,
-                new bytes(0) // placeholder
-            ),
-            "0x",
-            newCtx
-        );
-      } else {
-      // @dev If there is no existing outflow, then create new flow to equal inflow
-          (newCtx, ) = _host.callAgreementWithContext(
-              _cfa,
-              abi.encodeWithSelector(
-                  _cfa.createFlow.selector,
-                  _acceptedToken,
-                  _receiver,
-                  inFlowRate,
-                  new bytes(0) // placeholder
-              ),
-              "0x",
-              newCtx
-          );
-      }
+    // /* App Functions */
+    // TODO: Create function to percent difference from token1 to token2 to calculate fees
+    function calculateFlowToken1(int96 flowRate) pure internal returns (int96) {
+        return flowRate;
     }
 
-    // @dev Change the Receiver of the total flow
-    function _changeReceiver( address newReceiver ) internal {
-        require(newReceiver != address(0), "New receiver is zero address");
-        // @dev because our app is registered as final, we can't take downstream apps
-        require(!_host.isApp(ISuperApp(newReceiver)), "New receiver can not be a superApp");
-        if (newReceiver == _receiver) return ;
-        // @dev delete flow to old receiver
-        (,int96 outFlowRate,,) = _cfa.getFlow(_acceptedToken, address(this), _receiver); //CHECK: unclear what happens if flow doesn't exist.
-        if(outFlowRate > 0){
-          _host.callAgreement(
-              _cfa,
-              abi.encodeWithSelector(
-                  _cfa.deleteFlow.selector,
-                  _acceptedToken,
-                  address(this),
-                  _receiver,
-                  new bytes(0)
-              ),
-              "0x"
-          );
-          // @dev create flow to new receiver
-          _host.callAgreement(
-              _cfa,
-              abi.encodeWithSelector(
-                  _cfa.createFlow.selector,
-                  _acceptedToken,
-                  newReceiver,
-                  _cfa.getNetFlow(_acceptedToken, address(this)),
-                  new bytes(0)
-              ),
-              "0x"
-          );
-        }
-        // @dev set global receiver to new receiver
-        _receiver = newReceiver;
+    function calculateFlowToken2(int96 flowRate) pure internal returns (int96) {
+        return flowRate;
+    }
 
+    function _getShareholderInfo(bytes calldata _agreementData, ISuperToken _superToken)
+        internal
+        view
+        returns (address _shareholder, int96 _flowRate, uint256 _timestamp)
+    {
+        (_shareholder, ) = abi.decode(_agreementData, (address, address));
+        (_timestamp, _flowRate, , ) = cfa.getFlow(
+            _superToken,
+            _shareholder,
+            address(this)
+        );
     }
 
     /**************************************************************************
@@ -165,7 +97,7 @@ contract RedirectTokens is SuperAppBase {
         ISuperToken _superToken,
         address _agreementClass,
         bytes32, // _agreementId,
-        bytes calldata /*_agreementData*/,
+        bytes calldata _agreementData,
         bytes calldata ,// _cbdata,
         bytes calldata _ctx
     )
@@ -174,14 +106,33 @@ contract RedirectTokens is SuperAppBase {
         onlyHost
         returns (bytes memory newCtx)
     {
-        return _updateOutflow(_ctx);
+        // According to the app basic law, we should never revert in a termination callback
+        if (!_isAcceptedToken(_superToken) || !_isCFAv1(_agreementClass)) return _ctx;
+
+        (address _shareholder, ) = abi.decode(_agreementData, (address, address));
+        (, int96 _flowRate, , ) = cfa.getFlow(
+            _superToken,
+            _shareholder,
+            address(this)
+        );
+
+        bool istoken1 = _superToken == token1;
+
+        return cfaV1.createFlowWithCtx(
+            _ctx, 
+            _shareholder, 
+            istoken1 ? token2 : token1, 
+            _flowRate, 
+            "0x"
+        );
+
     }
 
     function afterAgreementUpdated(
         ISuperToken _superToken,
         address _agreementClass,
         bytes32 ,//_agreementId,
-        bytes calldata agreementData,
+        bytes calldata _agreementData,
         bytes calldata ,//_cbdata,
         bytes calldata _ctx
     )
@@ -190,14 +141,30 @@ contract RedirectTokens is SuperAppBase {
         onlyHost
         returns (bytes memory newCtx)
     {
-        return _updateOutflow(_ctx);
+        // According to the app basic law, we should never revert in a termination callback
+        if (!_isAcceptedToken(_superToken) || !_isCFAv1(_agreementClass)) return _ctx;
+
+        (address _shareholder, ) = abi.decode(_agreementData, (address, address));
+        (, int96 _flowRate, , ) = cfa.getFlow(
+            _superToken,
+            _shareholder,
+            address(this)
+        );
+        bool istoken1 = _superToken == token1;
+        return cfaV1.updateFlowWithCtx(
+            _ctx,
+            _shareholder,
+            istoken1 ? token2 : token1,
+            _flowRate,
+            "0x"
+        );
     }
 
     function afterAgreementTerminated(
         ISuperToken _superToken,
         address _agreementClass,
         bytes32 ,//_agreementId,
-        bytes calldata /*_agreementData*/,
+        bytes calldata _agreementData,
         bytes calldata ,//_cbdata,
         bytes calldata _ctx
     )
@@ -206,12 +173,22 @@ contract RedirectTokens is SuperAppBase {
         returns (bytes memory newCtx)
     {
         // According to the app basic law, we should never revert in a termination callback
-        if (!_isSameToken(_superToken) || !_isCFAv1(_agreementClass)) return _ctx;
-        return _updateOutflow(_ctx);
+        if (!_isAcceptedToken(_superToken) || !_isCFAv1(_agreementClass)) return _ctx;
+        
+        (address _shareholder,, ) = _getShareholderInfo(
+            _agreementData, _superToken
+        );
+
+        return cfaV1.deleteFlowWithCtx(
+            _ctx,
+            address(this),
+            _shareholder,
+            (_superToken == token1) ? token2 : token1
+        );
     }
 
     function _isAcceptedToken(ISuperToken superToken) private view returns (bool) {
-        return address(superToken) == address(_acceptedToken);
+        return (address(superToken) == address(token1) || address(superToken) == address(token2));
     }
 
     function _isCFAv1(address agreementClass) private view returns (bool) {

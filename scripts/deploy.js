@@ -14,12 +14,16 @@ async function main() {
   // await hre.run('compile');
 
   // We get the contract to deploy
-  const Greeter = await hre.ethers.getContractFactory("Greeter");
-  const greeter = await Greeter.deploy("Hello, Hardhat!");
+  const StableCashFlow = await hre.ethers.getContractFactory("StableCashFlow");
+  const fDAIx = "0xBF6201a6c48B56d8577eDD079b84716BB4918E8A";
+  const fUSDCx = "0x2dC36872a445adF0bFf63cc0eeee52A2b801625f";
+  const host = "0xF2B4E81ba39F5215Db2e05B2F66f482BB8e87FD2";
+  const cfa = "0xaD2F1f7cd663f6a15742675f975CcBD42bb23a88";
+  const stableCashFlow = await StableCashFlow.deploy(host, cfa, fDAIx, fUSDCx);
 
-  await greeter.deployed();
+  await stableCashFlow.deployed();
 
-  console.log("Greeter deployed to:", greeter.address);
+  console.log("StableCashFlow deployed to:", stableCashFlow.address);
 }
 
 // We recommend this pattern to be able to use async/await everywhere
