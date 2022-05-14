@@ -23,6 +23,7 @@ import {
 } from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
 
 contract RedirectTokens is SuperAppBase {
+
     using CFAv1Library for CFAv1Library.InitData;
     
     CFAv1Library.InitData public cfaV1;
@@ -66,10 +67,21 @@ contract RedirectTokens is SuperAppBase {
 
         _host.registerApp(configWord);
     }
+
+
+    modifier onlyHost() {
+        require(msg.sender == address(_host), "RedirectAll: support only one host");
+        _;
+    }
+
+    modifier onlyExpected(ISuperToken superToken, address agreementClass) {
+        require(_isAcceptedToken(superToken), "RedirectAll: not accepted token");
+        require(_isCFAv1(agreementClass), "RedirectAll: only CFAv1 supported");
+        _;
+    }
     
-    function getRatio(uint numerator, uint denominator) pure internal returns (uint) {
-        uint _numerator = numerator * 10 ** (18 + 1);
-        uint _quotient = ((_numerator / denominator) + 5) / 10;
+    function getRatio(uint256 numerator, uint256 denominator) internal pure returns (uint256) {
+        uint _quotient = ((((numerator * (10 ** (18 + 1))) / denominator) + 5) / 10);
         return _quotient;
     }
 
@@ -77,8 +89,7 @@ contract RedirectTokens is SuperAppBase {
         if (_value > (2 ** 96) - 1) {
             return int96(0);
         }
-        int _result = int(_value);
-        return int96(_result);
+        return int96(int(_value));
     }
 
     // /* App Functions */
@@ -99,8 +110,8 @@ contract RedirectTokens is SuperAppBase {
                         getRatio(token1Balance, token2Balance);
 
         return isToken1Greater ? 
-                safeCastToInt96(flowRate - (ratio * (flowRate / 10 ** 4))) :
-                safeCastToInt96(flowRate + (ratio * (flowRate / 10 ** 4)));
+                safeCastToInt96((ratio * flowRate) / 10 ** 18) :
+                safeCastToInt96((2 * flowRate) - (ratio * flowRate) / 10 ** 18);
     }
 
     function calculateFlowToken2(int96 _flowRate) view public returns (int96) {
@@ -119,9 +130,10 @@ contract RedirectTokens is SuperAppBase {
                         getRatio(token2Balance, token1Balance);
 
         return isToken2Greater ? 
-                safeCastToInt96(flowRate + (ratio * (flowRate / 10 ** 4))) :
-                safeCastToInt96(flowRate - (ratio * (flowRate / 10 ** 4)));
+                safeCastToInt96((ratio * flowRate) / 10 ** 18) :
+                safeCastToInt96((2 * flowRate) - (ratio * flowRate) / 10 ** 18);
     }
+
 
     function _getShareholderInfo(bytes calldata _agreementData, ISuperToken _superToken)
         internal
@@ -243,16 +255,5 @@ contract RedirectTokens is SuperAppBase {
         return ISuperAgreement(agreementClass).agreementType()
             == keccak256("org.superfluid-finance.agreements.ConstantFlowAgreement.v1");
     }
-
-    modifier onlyHost() {
-        require(msg.sender == address(_host), "RedirectAll: support only one host");
-        _;
-    }
-
-    modifier onlyExpected(ISuperToken superToken, address agreementClass) {
-        require(_isAcceptedToken(superToken), "RedirectAll: not accepted token");
-        require(_isCFAv1(agreementClass), "RedirectAll: only CFAv1 supported");
-        _;
-    }
-
 }
+
