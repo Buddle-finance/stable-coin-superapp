@@ -130,8 +130,8 @@ contract RedirectTokens is SuperAppBase {
                         getRatio(token2Balance, token1Balance);
 
         return isToken2Greater ? 
-                safeCastToInt96((ratio * flowRate) / 10 ** 18) :
-                safeCastToInt96((2 * flowRate) - (ratio * flowRate) / 10 ** 18);
+                safeCastToInt96((2 * flowRate) - (ratio * flowRate) / 10 ** 18) :
+                safeCastToInt96((ratio * flowRate) / 10 ** 18);
     }
 
 
