@@ -12,6 +12,8 @@ import {
     SuperAppDefinitions
 } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 import { IConstantFlowAgreementV1 } from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/IConstantFlowAgreementV1.sol";
 
 import {
@@ -22,7 +24,10 @@ import {
     SuperAppBase
 } from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
 
-contract RedirectTokens is SuperAppBase {
+import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
+import "@uniswap/swap-router-contracts/contracts/interfaces/ISwapRouter02.sol";
+
+contract RedirectTokens is SuperAppBase, Ownable {
 
     using CFAv1Library for CFAv1Library.InitData;
     
@@ -31,6 +36,7 @@ contract RedirectTokens is SuperAppBase {
     ISuperToken private token1; // accepted token
     ISuperToken private token2; // accepted token
     IConstantFlowAgreementV1 cfa;
+    int96 public fees_basis_points;
 
     constructor(
         ISuperfluid host,
@@ -43,7 +49,7 @@ contract RedirectTokens is SuperAppBase {
         require(address(_token2) != address(0), "token2 is zero address");
 
         _host = host;
-
+        fees_basis_points = 10;
         // initialize InitData struct, and set equal to cfaV1
         cfaV1 = CFAv1Library.InitData(
             host,
@@ -93,6 +99,21 @@ contract RedirectTokens is SuperAppBase {
     }
 
     // /* App Functions */
+    function changeFeeBasisPoints(int96 _fees_basis_points) onlyOwner public {
+        require(_fees_basis_points > 0, "RedirectAll: fees_basis_points must be greater than 0");
+        fees_basis_points = _fees_basis_points;
+    }
+
+    function rebalanceTokens() public {
+        IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
+             .ExactInputParams({
+                 path: encodedPath,
+                 recipient: address(this),
+                 amountIn: amountIn,
+                 amountOutMinimum: amountOutMin
+             });
+    }
+
     // Create function to percent difference from token1 to token2 to calculate fees
     function calculateFlowToken1(int96 _flowRate) view public returns (int96) {
         uint256 flowRate = uint256(int(_flowRate));
@@ -180,7 +201,7 @@ contract RedirectTokens is SuperAppBase {
             _ctx, 
             _shareholder, 
             isToken1 ? token2 : token1, 
-            isToken1 ? calculateFlowToken2(_flowRate) : calculateFlowToken1(_flowRate),
+            _flowRate * (10000 - fees_basis_points) / 10000,
             "0x"
         );
 
@@ -214,7 +235,7 @@ contract RedirectTokens is SuperAppBase {
             _ctx,
             _shareholder,
             isToken1 ? token2 : token1,
-            isToken1 ? calculateFlowToken2(_flowRate) : calculateFlowToken1(_flowRate),
+            _flowRate * (10000 - fees_basis_points) / 10000, // TODO: Ask Nik - subtract 0.1% from the flow rate to avoid rounding errors
             "0x"
         );
     }
