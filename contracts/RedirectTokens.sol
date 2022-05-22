@@ -24,10 +24,11 @@ import {
     SuperAppBase
 } from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
 
+// NOTE: Change version in file "@uniswap/swap-router-contracts/contracts/interfaces/IApproveAndCall.sol" to >=0.7.6
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "@uniswap/swap-router-contracts/contracts/interfaces/ISwapRouter02.sol";
 
-contract RedirectTokens is SuperAppBase, Ownable {
+abstract contract RedirectTokens is SuperAppBase, Ownable {
 
     using CFAv1Library for CFAv1Library.InitData;
     
@@ -37,16 +38,23 @@ contract RedirectTokens is SuperAppBase, Ownable {
     ISuperToken private token2; // accepted token
     IConstantFlowAgreementV1 cfa;
     int96 public fees_basis_points;
+    ISwapRouter02 public swapRouter;
+    uint256 poolFees;
+    uint256 maxSlippage;
 
     constructor(
         ISuperfluid host,
         IConstantFlowAgreementV1 _cfa,
         ISuperToken _token1,
-        ISuperToken _token2
+        ISuperToken _token2,
+        ISwapRouter02 _swapRouter,
+        uint256 _poolFees,
+        uint256 _maxSlippage
     ) {
         require(address(host) != address(0), "host is zero address");
         require(address(_token1) != address(0), "token1 is zero address");
         require(address(_token2) != address(0), "token2 is zero address");
+        require(address(_swapRouter) != address(0), "swap router is zero address");
 
         _host = host;
         fees_basis_points = 10;
@@ -64,6 +72,9 @@ contract RedirectTokens is SuperAppBase, Ownable {
         cfa = _cfa;
         token1 = _token1;
         token2 = _token2;
+        swapRouter = _swapRouter;
+        poolFees = _poolFees;
+        maxSlippage = _maxSlippage;
 
         uint256 configWord =
             SuperAppDefinitions.APP_LEVEL_FINAL |
@@ -99,19 +110,50 @@ contract RedirectTokens is SuperAppBase, Ownable {
     }
 
     // /* App Functions */
-    function changeFeeBasisPoints(int96 _fees_basis_points) onlyOwner public {
+    function changeFeeBasisPoints(int96 _fees_basis_points) public onlyOwner {
         require(_fees_basis_points > 0, "RedirectAll: fees_basis_points must be greater than 0");
         fees_basis_points = _fees_basis_points;
     }
 
-    function rebalanceTokens() public {
+    function changePoolFees(uint256 _poolFees, uint256 _maxSlippage) public onlyOwner {
+        poolFees = _poolFees;
+        maxSlippage = _maxSlippage;
+    }
+
+    function rebalanceTokens() external {
+        uint256 token1Balance = token1.balanceOf(address(this));
+        uint256 token2Balance = token2.balanceOf(address(this));
+        uint256 swapAmount;
+        uint256 amountOutMin;
+        bytes memory encodedPath;
+
+        if (token1Balance == token2Balance) {
+            return;
+        }
+
+        if (token1Balance > token2Balance)
+        {
+            swapAmount = token1Balance - token2Balance;
+            TransferHelper.safeApprove(address(token1), address(swapRouter), swapAmount);
+            encodedPath = abi.encodePacked(address(token1), poolFees, address(token2));
+        } else {
+            swapAmount = token2Balance - token1Balance;
+            TransferHelper.safeApprove(address(token2), address(swapRouter), swapAmount);
+            encodedPath = abi.encodePacked(address(token2), poolFees, address(token1));
+        }
+
+        amountOutMin = swapAmount * (10000 - maxSlippage) / 10000;
+
         IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
-             .ExactInputParams({
-                 path: encodedPath,
-                 recipient: address(this),
-                 amountIn: amountIn,
-                 amountOutMinimum: amountOutMin
-             });
+        .ExactInputParams({
+            path: encodedPath,
+            recipient: address(this),
+            amountIn: swapAmount,
+            amountOutMinimum: amountOutMin
+        });
+
+        // TODO: emit the swap amount
+        swapRouter.exactInput(params);
     }
 
     // Create function to percent difference from token1 to token2 to calculate fees

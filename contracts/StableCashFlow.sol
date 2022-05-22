@@ -1,5 +1,5 @@
 //SPDX-License-Identifier: Unlicense
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "hardhat/console.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -16,15 +16,21 @@ contract StableCashFlow is RedirectTokens {
 
     constructor(
         ISuperfluid host,
-        IConstantFlowAgreementV1 cfa,
-        ISuperToken _token1, 
-        ISuperToken _token2
+        IConstantFlowAgreementV1 _cfa,
+        ISuperToken _token1,
+        ISuperToken _token2,
+        ISwapRouter02 _swapRouter,
+        uint256 _poolFees,
+        uint256 _maxSlippage
     ) RedirectTokens(
             host,
-            cfa,
+            _cfa,
             _token1,
-            _token2
-        ) public {
+            _token2,
+            _swapRouter,
+            _poolFees,
+            _maxSlippage
+        ) {
         token1 = _token1;
         token2 = _token2;
     }

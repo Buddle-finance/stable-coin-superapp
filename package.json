@@ -24,6 +24,8 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^4.6.0",
-    "@superfluid-finance/ethereum-contracts": "^1.2.1"
+    "@superfluid-finance/ethereum-contracts": "^1.2.1",
+    "@uniswap/swap-router-contracts": "^1.2.1",
+    "@uniswap/v3-periphery": "^1.4.1"
   }
 }
