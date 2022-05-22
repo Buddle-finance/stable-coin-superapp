@@ -150,8 +150,8 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         return _price;
     }
 
-    function abs(int x) private pure returns (uint) {
-        return uint(x >= 0 ? x : -x);
+    function abs(int x) private pure returns (int) {
+        return x >= 0 ? x : -x;
     }
 
     function getLatestPrice() public view returns (int) {
@@ -182,7 +182,10 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         }
 
         require(currentPrice > 0, "Price is not positive");
-        require(abs(scalePrice((int(10 ** priceFeed.decimals()) - currentPrice), priceFeed.decimals(), 5)) < maxSlippage, "Price is too high");
+        // If the price difference is more than the max slippage, then don't do the swap
+        require(uint(scalePrice(
+                abs(int(10 ** priceFeed.decimals()) - currentPrice), priceFeed.decimals(), 5
+            )) <= maxSlippage, "Price is too high");
 
         if (token1Balance > token2Balance)
         {
