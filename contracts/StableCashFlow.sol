@@ -19,6 +19,7 @@ contract StableCashFlow is RedirectTokens {
         IConstantFlowAgreementV1 _cfa,
         ISuperToken _token1,
         ISuperToken _token2,
+        AggregatorV3Interface _priceFeed,
         ISwapRouter02 _swapRouter,
         uint256 _poolFees,
         uint256 _maxSlippage
@@ -27,6 +28,7 @@ contract StableCashFlow is RedirectTokens {
             _cfa,
             _token1,
             _token2,
+            _priceFeed,
             _swapRouter,
             _poolFees,
             _maxSlippage
@@ -36,8 +38,8 @@ contract StableCashFlow is RedirectTokens {
     }
 
     function addLiquidity(uint256 _amount) public {
-        require(token1.balanceOf(msg.sender) > 0, "Not enough balance");
-        require(token2.balanceOf(msg.sender) > 0, "Not enough balance");
+        require(token1.allowance(msg.sender, address(this)) >= _amount, "Not enough allowance");
+        require(token2.allowance(msg.sender, address(this)) > _amount, "Not enough allowance");
 
         token2.transferFrom(msg.sender, address(this), _amount);
         token1.transferFrom(msg.sender, address(this), _amount);

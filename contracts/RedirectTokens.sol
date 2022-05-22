@@ -28,6 +28,8 @@ import {
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "@uniswap/swap-router-contracts/contracts/interfaces/ISwapRouter02.sol";
 
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+
 abstract contract RedirectTokens is SuperAppBase, Ownable {
 
     using CFAv1Library for CFAv1Library.InitData;
@@ -38,6 +40,7 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
     ISuperToken private token2; // accepted token
     IConstantFlowAgreementV1 cfa;
     int96 public fees_basis_points;
+    AggregatorV3Interface public priceFeed;
     ISwapRouter02 public swapRouter;
     uint256 poolFees;
     uint256 maxSlippage;
@@ -47,6 +50,7 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         IConstantFlowAgreementV1 _cfa,
         ISuperToken _token1,
         ISuperToken _token2,
+        AggregatorV3Interface _priceFeed,
         ISwapRouter02 _swapRouter,
         uint256 _poolFees,
         uint256 _maxSlippage
@@ -72,6 +76,7 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         cfa = _cfa;
         token1 = _token1;
         token2 = _token2;
+        priceFeed = _priceFeed;
         swapRouter = _swapRouter;
         poolFees = _poolFees;
         maxSlippage = _maxSlippage;
@@ -115,9 +120,49 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         fees_basis_points = _fees_basis_points;
     }
 
-    function changePoolFees(uint256 _poolFees, uint256 _maxSlippage) public onlyOwner {
+    function changeSwapParams(
+        ISwapRouter02 _swapRouter,
+        uint256 _poolFees,
+        uint256 _maxSlippage
+    ) public onlyOwner {
+        if (address(_swapRouter) != address(0)) {
+            swapRouter = _swapRouter;
+        }
         poolFees = _poolFees;
         maxSlippage = _maxSlippage;
+    }
+
+    function changePriceFeedAggregator(AggregatorV3Interface _priceFeed) public onlyOwner {
+        require(address(_priceFeed) != address(0), "RedirectAll: price feed cannot be zero");
+        priceFeed = _priceFeed;
+    }
+
+    function scalePrice(int256 _price, uint8 _priceDecimals, uint8 _decimals)
+        private
+        pure
+        returns (int256)
+    {
+        if (_priceDecimals < _decimals) {
+            return _price * int256(10 ** uint256(_decimals - _priceDecimals));
+        } else if (_priceDecimals > _decimals) {
+            return _price / int256(10 ** uint256(_priceDecimals - _decimals));
+        }
+        return _price;
+    }
+
+    function abs(int x) private pure returns (uint) {
+        return uint(x >= 0 ? x : -x);
+    }
+
+    function getLatestPrice() public view returns (int) {
+        (
+            /*uint80 roundID*/,
+            int price,
+            /*uint startedAt*/,
+            /*uint timeStamp*/,
+            /*uint80 answeredInRound*/
+        ) = priceFeed.latestRoundData();
+        return price;
     }
 
     function rebalanceTokens() external {
@@ -125,21 +170,33 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         uint256 token2Balance = token2.balanceOf(address(this));
         uint256 swapAmount;
         uint256 amountOutMin;
+        uint256 amountOut;
+        int currentPrice = getLatestPrice();
         bytes memory encodedPath;
+        address token1Base = token1.getUnderlyingToken();
+        address token2Base = token2.getUnderlyingToken();
+        ISuperToken tokenToUpgrade;
 
         if (token1Balance == token2Balance) {
             return;
         }
 
+        require(currentPrice > 0, "Price is not positive");
+        require(abs(scalePrice((int(10 ** priceFeed.decimals()) - currentPrice), priceFeed.decimals(), 5)) < maxSlippage, "Price is too high");
+
         if (token1Balance > token2Balance)
         {
             swapAmount = token1Balance - token2Balance;
-            TransferHelper.safeApprove(address(token1), address(swapRouter), swapAmount);
-            encodedPath = abi.encodePacked(address(token1), poolFees, address(token2));
+            token1.downgrade(swapAmount);
+            tokenToUpgrade = token1;
+            TransferHelper.safeApprove(token1Base, address(swapRouter), swapAmount);
+            encodedPath = abi.encodePacked(token1Base, poolFees, token2Base);
         } else {
             swapAmount = token2Balance - token1Balance;
-            TransferHelper.safeApprove(address(token2), address(swapRouter), swapAmount);
-            encodedPath = abi.encodePacked(address(token2), poolFees, address(token1));
+            token2.downgrade(swapAmount);
+            tokenToUpgrade = token2;
+            TransferHelper.safeApprove(token2Base, address(swapRouter), swapAmount);
+            encodedPath = abi.encodePacked(token2Base, poolFees, token1Base);
         }
 
         amountOutMin = swapAmount * (10000 - maxSlippage) / 10000;
@@ -153,7 +210,8 @@ abstract contract RedirectTokens is SuperAppBase, Ownable {
         });
 
         // TODO: emit the swap amount
-        swapRouter.exactInput(params);
+        amountOut = swapRouter.exactInput(params);
+        tokenToUpgrade.upgrade(amountOut);
     }
 
     // Create function to percent difference from token1 to token2 to calculate fees
